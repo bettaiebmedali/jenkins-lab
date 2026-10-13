@@ -1,19 +1,19 @@
-
 pipeline {
     agent any
-
     stages {
         stage('Build') {
             steps {
-                echo "🛠️ Build de la branche ${env.BRANCH_NAME}"
-                sh 'mvn clean compile'
+                echo 'Building...'
             }
         }
-
         stage('Test') {
             steps {
-                echo '✅ Tests unitaires...'
-                sh 'mvn test'
+                echo 'Testing...'
+            }
+        }
+        stage('Deploy') {
+            steps {
+                echo 'Deploying...'
             }
         }
     }
