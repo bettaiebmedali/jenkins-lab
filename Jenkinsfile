@@ -1,217 +1,154 @@
-pipeline {
 
+pipeline {
     agent any
 
     environment {
+        DOCKER_USER  = 'dockerid'
+        DOCKER_IMAGE = 'dockerid/microapp'
 
-        // Utilisateur Docker Hub
-        DOCKER_USER = 'dockerID'
-
-        // Repository Docker en minuscules
-        DOCKER_IMAGE = 'dockerID/microapp'
-
-        // Variables applicatives
-        APP_NAME = ''
-        APP_PORT = ''
+        APP_NAME    = ''
+        APP_PORT    = ''
         APP_VERSION = ''
     }
 
     stages {
-
-        // ============================================================
-        // 1. Lecture du fichier .env
-        // ============================================================
-
         stage('Charger .env') {
-
             steps {
-
                 script {
+                    if (!fileExists('.env')) {
+                        error('Le fichier .env est absent du workspace.')
+                    }
 
                     def config = [:]
 
-                    def envFile = readFile('.env')
-
-                    envFile.split('\n').each { line ->
-
+                    readFile('.env').split('\n').each { line ->
                         line = line.trim()
 
-                        // Ignore les lignes vides et les commentaires
                         if (line && !line.startsWith('#')) {
-
                             def parts = line.split('=', 2)
 
-                            if (parts.size() == 2) {
-
-                                def key = parts[0].trim()
-                                def value = parts[1].trim()
-
-                                config[key] = value
+                            if (parts.length == 2) {
+                                config[parts[0].trim()] =
+                                    parts[1].trim()
                             }
                         }
                     }
 
-                    // Docker exige un repository en minuscules
-                    env.APP_NAME = config['APP_NAME']?.toLowerCase()
-                    env.APP_PORT = config['APP_PORT']
-                    env.APP_VERSION = config['APP_VERSION']
+                    env.APP_NAME =
+                        (config['APP_NAME'] ?: '').toLowerCase()
+                    env.APP_PORT = config['APP_PORT'] ?: ''
+                    env.APP_VERSION = config['APP_VERSION'] ?: ''
 
-                    echo "========================================"
-                    echo "Configuration de l'application"
-                    echo "========================================"
+                    if (!env.APP_NAME ||
+                        !env.APP_PORT ||
+                        !env.APP_VERSION) {
+                        error('APP_NAME, APP_PORT et APP_VERSION sont obligatoires.')
+                    }
+
+                    if (!(env.APP_PORT ==~ /[0-9]+/) ||
+                        env.APP_PORT.toInteger() < 1 ||
+                        env.APP_PORT.toInteger() > 65535) {
+                        error('APP_PORT doit être compris entre 1 et 65535.')
+                    }
+
+                    if (!(env.APP_VERSION ==~
+                        /[0-9]+\.[0-9]+\.[0-9]+/)) {
+                        error('APP_VERSION doit respecter le format X.Y.Z.')
+                    }
+
                     echo "Application : ${env.APP_NAME}"
                     echo "Port        : ${env.APP_PORT}"
                     echo "Version     : ${env.APP_VERSION}"
                     echo "Image       : ${env.DOCKER_IMAGE}:${env.APP_VERSION}"
-                    echo "========================================"
                 }
             }
         }
 
-        // ============================================================
-        // 2. Build Docker
-        // ============================================================
-
         stage('Build Docker') {
-
             steps {
+                echo 'Construction de l’image Docker...'
 
-                echo "🐳 Construction de l'image Docker..."
-
-                sh """
+                sh '''
+                    set -eu
                     docker build \
-                        -t ${env.DOCKER_IMAGE}:${env.APP_VERSION} \
-                        -t ${env.DOCKER_IMAGE}:latest \
-                        .
-                """
-
-                echo "✅ Image Docker construite"
-
-                sh """
-                    docker images ${env.DOCKER_IMAGE}
-                """
+                      -t "$DOCKER_IMAGE:$APP_VERSION" \
+                      -t "$DOCKER_IMAGE:latest" \
+                      .
+                    docker images "$DOCKER_IMAGE"
+                '''
             }
         }
 
-        // ============================================================
-        // 3. Login Docker Hub
-        // ============================================================
-
         stage('Login Docker Hub') {
-
+            when {
+                branch 'main'
+            }
             steps {
-
                 withCredentials([
                     string(
                         credentialsId: 'DOCKER_PASSWORD',
                         variable: 'DOCKER_PASSWORD'
                     )
                 ]) {
-
                     sh '''
-                        echo "$DOCKER_PASSWORD" | \
-                        docker login \
-                        -u "$DOCKER_USER" \
-                        --password-stdin
+                        set +x
+                        echo "$DOCKER_PASSWORD" |
+                          docker login \
+                            --username "$DOCKER_USER" \
+                            --password-stdin
                     '''
                 }
-
-                echo "✅ Connexion à Docker Hub réussie"
             }
         }
-
-        // ============================================================
-        // 4. Push Docker
-        // ============================================================
 
         stage('Push Docker') {
-
-            steps {
-
-                echo "📦 Publication sur Docker Hub..."
-
-                sh """
-                    docker push ${env.DOCKER_IMAGE}:${env.APP_VERSION}
-                    docker push ${env.DOCKER_IMAGE}:latest
-                """
-
-                echo "✅ Image publiée sur Docker Hub"
-            }
-        }
-
-        // ============================================================
-        // 5. Deploy uniquement sur main
-        // ============================================================
-
-        stage('Deploy') {
-
             when {
                 branch 'main'
             }
-
             steps {
+                sh '''
+                    set -eu
+                    docker push "$DOCKER_IMAGE:$APP_VERSION"
+                    docker push "$DOCKER_IMAGE:latest"
+                '''
+            }
+        }
 
+        stage('Deploy') {
+            when {
+                branch 'main'
+            }
+            steps {
                 echo """
                 ========================================
-                🚀 DÉPLOIEMENT EN PRODUCTION
-                ========================================
-
+                DEPLOIEMENT SIMULE
                 Application : ${env.APP_NAME}
                 Version     : ${env.APP_VERSION}
                 Port        : ${env.APP_PORT}
                 Image       : ${env.DOCKER_IMAGE}:${env.APP_VERSION}
-
                 ========================================
                 """
 
-                // Déploiement simulé pour le TP
                 sh '''
                     echo "Déploiement en cours..."
                     sleep 3
-                    echo "✅ Déploiement terminé"
+                    echo "Déploiement simulé terminé."
                 '''
             }
         }
     }
 
-    // ================================================================
-    // Actions finales
-    // ================================================================
-
     post {
-
         success {
-
-            echo """
-            ========================================
-            ✅ PIPELINE RÉUSSIE
-            ========================================
-
-            Application : ${env.APP_NAME}
-            Version     : ${env.APP_VERSION}
-            Image       : ${env.DOCKER_IMAGE}:${env.APP_VERSION}
-
-            ========================================
-            """
+            echo "Pipeline réussie : ${env.DOCKER_IMAGE}:${env.APP_VERSION}"
         }
 
         failure {
-
-            echo """
-            ========================================
-            ❌ PIPELINE EN ÉCHEC
-            ========================================
-
-            Application : ${env.APP_NAME ?: 'inconnue'}
-            Version     : ${env.APP_VERSION ?: 'inconnue'}
-
-            ========================================
-            """
+            echo "Pipeline en échec. Vérifie les logs des étapes."
         }
 
         always {
-
-            echo "🏁 Fin du pipeline"
+            echo 'Fin du pipeline.'
         }
     }
 }
